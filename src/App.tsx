@@ -30,6 +30,7 @@ const DEFAULT_CONFIG: ApiConfig = {
 const statusLabels: Record<JobStatus, string> = {
   QUEUED: "排队中",
   GENERATING_FRAMES: "生成帧",
+  DOWNLOADING_FRAMES: "下载帧",
   ENCODING: "合成视频",
   COMPLETED: "已完成",
   FAILED: "失败",
@@ -81,6 +82,11 @@ function App() {
   const [imageModel, setImageModel] = useState("qwen-image");
   const [size, setSize] = useState("640x352");
   const [duration, setDuration] = useState(5);
+  const [projectId, setProjectId] = useState("drama-001");
+  const [sceneId, setSceneId] = useState("scene-001");
+  const [shotId, setShotId] = useState("shot-001");
+  const [startImageResultId, setStartImageResultId] = useState("");
+  const [seed, setSeed] = useState("");
   const selectedVideoUrl = useProtectedUrl(config, selectedJob?.status === "COMPLETED" ? selectedJob.resultUrl : undefined);
 
   const activeCount = useMemo(
@@ -138,7 +144,18 @@ function App() {
     setError("");
     try {
       if (mode === "video") {
-        const job = await createVideo(config, { model: videoModel, prompt: prompt.trim(), duration, size });
+        const job = await createVideo(config, {
+          model: videoModel,
+          prompt: prompt.trim(),
+          duration,
+          size,
+          project_id: projectId.trim() || undefined,
+          scene_id: sceneId.trim() || undefined,
+          shot_id: shotId.trim() || undefined,
+          start_image_result_id: videoModel === "Wan2.2-TI2V-5B" ? startImageResultId.trim() || undefined : undefined,
+          seed: seed.trim() ? Number(seed) : undefined,
+          steps: 14,
+        });
         setJobs((current) => [job, ...current]);
         setSelectedJob(job);
         setNotice("视频任务已提交，Mac Studio 正在生成帧");
@@ -200,6 +217,15 @@ function App() {
               </select></label>
               <label><span>分辨率</span><select value={size} onChange={(event) => setSize(event.target.value)}><option>640x352</option><option>832x480</option><option>1024x576</option><option>1024x1024</option></select></label>
               {mode === "video" && <label><span>时长</span><select value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value={3}>3 秒</option><option value={5}>5 秒</option></select></label>}
+              {mode === "video" && <>
+                <label><span>短剧项目 ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" /></label>
+                <label><span>场景 ID</span><input value={sceneId} onChange={(event) => setSceneId(event.target.value)} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" /></label>
+                <label><span>镜头 ID</span><input value={shotId} onChange={(event) => setShotId(event.target.value)} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" /></label>
+                <label><span>固定 Seed（可选）</span><input value={seed} onChange={(event) => setSeed(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="留空则随机" /></label>
+              </>}
+              {mode === "video" && videoModel === "Wan2.2-TI2V-5B" && <>
+                <label className="wide-field"><span>首帧图片结果 ID（可选）</span><input value={startImageResultId} onChange={(event) => setStartImageResultId(event.target.value)} placeholder="tenx_..._00001_" /></label>
+              </>}
             </div>
             <button className="primary-button" disabled={busy || !prompt.trim()}>{busy ? <LoaderCircle className="spin" size={19} /> : <Sparkles size={19} />}{busy ? "正在提交…" : mode === "video" ? "开始生成视频" : "开始生成图片"}<ChevronRight size={18} /></button>
             <p className="flow-note"><Server size={14} />{mode === "video" ? "Mac Studio 仅生成 PNG 帧，Windows 使用 FFmpeg 合成 MP4" : "生成结果由 Windows Media Service 保存到外接硬盘"}</p>
@@ -210,12 +236,12 @@ function App() {
             {mode === "video" ? (
               selectedJob ? <div className="result-view">
                 <div className="media-stage">
-                  {selectedVideoUrl ? <video src={selectedVideoUrl} controls autoPlay loop /> : <div className="generation-state">{selectedJob.status === "FAILED" ? <CircleStop size={36} /> : <><div className="orbit"><Play size={26} /></div><span>{statusLabels[selectedJob.status]}</span><small>{selectedJob.status === "GENERATING_FRAMES" ? "模型正在输出连续画面" : selectedJob.status === "ENCODING" ? "Windows 正在合成 MP4" : "等待计算资源"}</small></>}</div>}
+                  {selectedVideoUrl ? <video src={selectedVideoUrl} controls autoPlay loop /> : <div className="generation-state">{selectedJob.status === "FAILED" ? <CircleStop size={36} /> : <><div className="orbit"><Play size={26} /></div><span>{statusLabels[selectedJob.status]}</span><small>{selectedJob.status === "GENERATING_FRAMES" ? "模型正在输出连续画面" : selectedJob.status === "DOWNLOADING_FRAMES" ? "Windows 正在通过鉴权 HTTP 下载帧" : selectedJob.status === "ENCODING" ? "Windows 正在合成 MP4" : "等待计算资源"}</small></>}</div>}
                 </div>
-                <div className="result-meta"><div><span>任务 ID</span><code>{selectedJob.id.slice(0, 12)}…</code></div><div><span>规格</span><strong>{selectedJob.frameCount ? `${selectedJob.frameCount} 帧 · ${selectedJob.fps} FPS` : size}</strong></div>{selectedVideoUrl && <a href={selectedVideoUrl} download={`${selectedJob.id}.mp4`}><Download size={16} />下载 MP4</a>}</div>
+                <div className="result-meta"><div><span>任务 ID</span><code>{selectedJob.id.slice(0, 12)}…</code></div><div><span>镜头</span><strong>{selectedJob.shotId || shotId}</strong></div><div><span>规格</span><strong>{selectedJob.frameCount ? `${selectedJob.frameCount} 帧 · ${selectedJob.fps} FPS` : size}</strong></div>{selectedVideoUrl && <a href={selectedVideoUrl} download={`${selectedJob.projectId || "video"}-${selectedJob.shotId || selectedJob.id}.mp4`}><Download size={16} />下载 MP4</a>}</div>
                 {selectedJob.error && <p className="job-error"><AlertCircle size={15} />{selectedJob.error}</p>}
               </div> : <EmptyPreview type="video" />
-            ) : images.length ? <div className="image-grid">{images.map((image) => <ProtectedImage key={image.result_id} config={config} image={image} />)}</div> : <EmptyPreview type="image" />}
+            ) : images.length ? <div className="image-grid">{images.map((image) => <ProtectedImage key={image.result_id} config={config} image={image} onUseAsStart={() => { setStartImageResultId(image.result_id); setVideoModel("Wan2.2-TI2V-5B"); setMode("video"); setNotice("已将图片设为短剧镜头首帧"); }} />)}</div> : <EmptyPreview type="image" />}
           </section>
         </section>
 
@@ -238,9 +264,9 @@ function EmptyPreview({ type }: { type: "video" | "image" }) {
   return <div className="empty-preview">{type === "video" ? <Film size={42} /> : <ImageIcon size={42} />}<h3>准备创造新内容</h3><p>填写左侧参数并提交，生成结果将在这里展示。</p></div>;
 }
 
-function ProtectedImage({ config, image }: { config: ApiConfig; image: ImageResult }) {
+function ProtectedImage({ config, image, onUseAsStart }: { config: ApiConfig; image: ImageResult; onUseAsStart: () => void }) {
   const url = useProtectedUrl(config, image.url);
-  return <div className="image-result">{url ? <img src={url} alt="AI 生成结果" /> : <LoaderCircle className="spin" />} {url && <a href={url} download={`${image.result_id}.png`}><Download size={16} />下载</a>}</div>;
+  return <div className="image-result">{url ? <img src={url} alt="AI 生成结果" /> : <LoaderCircle className="spin" />} {url && <><button type="button" onClick={onUseAsStart}><Film size={15} />设为首帧</button><a href={url} download={`${image.result_id}.png`}><Download size={16} />下载</a></>}</div>;
 }
 
 function SettingsModal({ config, onSave, onClose }: { config: ApiConfig; onSave: (value: ApiConfig) => void; onClose: () => void }) {

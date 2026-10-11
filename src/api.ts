@@ -39,7 +39,18 @@ export function listVideoJobs(config: ApiConfig): Promise<MediaJob[]> {
 
 export function createVideo(
   config: ApiConfig,
-  payload: { model: string; prompt: string; duration: number; size: string },
+  payload: {
+    model: string;
+    prompt: string;
+    duration: number;
+    size: string;
+    project_id?: string;
+    scene_id?: string;
+    shot_id?: string;
+    start_image_result_id?: string;
+    seed?: number;
+    steps?: number;
+  },
 ): Promise<MediaJob> {
   return requestJson(endpoint(config, "/api/v1/videos/generations"), {
     method: "POST",

@@ -7,6 +7,9 @@ Tenx AI 图片与视频生成控制台。部署在 Windows，与 `tenx-ai-media-
 - Media Service 健康状态和外接硬盘可用性检查
 - `qwen-image`、`flux-dev` 图片生成与受保护结果下载
 - `Wan2.2-TI2V-5B`、`HunyuanVideo-1.5` 视频任务提交
+- 短剧项目、场景和镜头标识，以及可复现 Seed
+- 将已生成图片直接设为 Wan 2.2 镜头首帧
+- 展示 Windows 通过鉴权 HTTP 下载帧的任务阶段
 - 视频任务列表、自动轮询、阶段状态和错误展示
 - 通过鉴权请求预览、下载图片和 MP4
 - API Key 仅保存到浏览器当前会话

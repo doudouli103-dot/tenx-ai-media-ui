@@ -1,6 +1,7 @@
 export type JobStatus =
   | "QUEUED"
   | "GENERATING_FRAMES"
+  | "DOWNLOADING_FRAMES"
   | "ENCODING"
   | "COMPLETED"
   | "FAILED";
@@ -16,13 +17,22 @@ export interface MediaJob {
   framesRelativePath?: string;
   frameCount?: number;
   fps?: number;
+  projectId?: string;
+  sceneId?: string;
+  shotId?: string;
+  startImageResultId?: string;
+  seed?: number;
+  steps?: number;
+  workflowVersion?: string;
+  referenceMode?: string;
   resultUrl?: string;
   error?: string;
 }
 
 export interface HealthStatus {
   status: string;
-  frames_root_available: boolean;
+  frame_transport: string;
+  frame_cache_available: boolean;
   results_root_available: boolean;
 }
 
