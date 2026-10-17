@@ -2,6 +2,7 @@ export type JobStatus =
   | "QUEUED"
   | "GENERATING_FRAMES"
   | "DOWNLOADING_FRAMES"
+  | "GENERATING_AUDIO"
   | "ENCODING"
   | "COMPLETED"
   | "FAILED";
@@ -27,6 +28,11 @@ export interface MediaJob {
   referenceMode?: string;
   resultUrl?: string;
   error?: string;
+  audioEnabled?: boolean;
+  audioText?: string;
+  audioVoice?: string;
+  audioId?: string;
+  audioDurationSeconds?: number;
 }
 
 export interface HealthStatus {

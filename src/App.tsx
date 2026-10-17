@@ -31,6 +31,7 @@ const statusLabels: Record<JobStatus, string> = {
   QUEUED: "排队中",
   GENERATING_FRAMES: "生成帧",
   DOWNLOADING_FRAMES: "下载帧",
+  GENERATING_AUDIO: "生成配音",
   ENCODING: "合成视频",
   COMPLETED: "已完成",
   FAILED: "失败",
@@ -87,6 +88,10 @@ function App() {
   const [shotId, setShotId] = useState("shot-001");
   const [startImageResultId, setStartImageResultId] = useState("");
   const [seed, setSeed] = useState("");
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [audioText, setAudioText] = useState("");
+  const [audioVoice, setAudioVoice] = useState("demo");
+  const [audioSpeed, setAudioSpeed] = useState(1);
   const selectedVideoUrl = useProtectedUrl(config, selectedJob?.status === "COMPLETED" ? selectedJob.resultUrl : undefined);
 
   const activeCount = useMemo(
@@ -155,6 +160,7 @@ function App() {
           start_image_result_id: videoModel === "Wan2.2-TI2V-5B" ? startImageResultId.trim() || undefined : undefined,
           seed: seed.trim() ? Number(seed) : undefined,
           steps: 14,
+          audio: audioEnabled ? { text: audioText.trim(), voice: audioVoice.trim(), speed: audioSpeed } : undefined,
         });
         setJobs((current) => [job, ...current]);
         setSelectedJob(job);
@@ -187,7 +193,7 @@ function App() {
           <div className="machine-card">
             <span className="eyebrow">COMPUTE ROUTE</span>
             <div><span className="machine-dot mac" />Mac Studio <small>生成帧</small></div>
-            <div><span className="machine-dot win" />Windows <small>FFmpeg</small></div>
+            <div><span className="machine-dot win" />Windows <small>CosyVoice / FFmpeg</small></div>
           </div>
           <button className="settings-button" onClick={() => setShowSettings(true)}><Settings2 size={18} />连接设置</button>
         </div>
@@ -227,8 +233,19 @@ function App() {
                 <label className="wide-field"><span>首帧图片结果 ID（可选）</span><input value={startImageResultId} onChange={(event) => setStartImageResultId(event.target.value)} placeholder="tenx_..._00001_" /></label>
               </>}
             </div>
+            {mode === "video" && <section className="audio-options">
+              <label className="audio-toggle"><input type="checkbox" checked={audioEnabled} onChange={(event) => setAudioEnabled(event.target.checked)} />CosyVoice 配音</label>
+              {audioEnabled && <>
+                <label className="prompt-field"><textarea aria-label="配音文本" value={audioText} onChange={(event) => setAudioText(event.target.value)} rows={3} maxLength={500} required placeholder="输入角色台词或旁白（与画面描述分开填写）" /><span>{audioText.length} / 500</span></label>
+                <div className="form-grid">
+                  <label><span>音色 ID</span><input value={audioVoice} onChange={(event) => setAudioVoice(event.target.value)} required pattern="[A-Za-z0-9_-]{1,64}" placeholder="demo" /></label>
+                  <label><span>语速</span><select value={audioSpeed} onChange={(event) => setAudioSpeed(Number(event.target.value))}><option value={0.8}>0.8 倍</option><option value={1}>1.0 倍</option><option value={1.2}>1.2 倍</option><option value={1.5}>1.5 倍</option></select></label>
+                </div>
+                <p className="audio-hint">台词自动分段生成；显存不足时自动切换 CPU，等待时间会增加。配音超出画面时延长最后一帧，不含口型同步。</p>
+              </>}
+            </section>}
             <button className="primary-button" disabled={busy || !prompt.trim()}>{busy ? <LoaderCircle className="spin" size={19} /> : <Sparkles size={19} />}{busy ? "正在提交…" : mode === "video" ? "开始生成视频" : "开始生成图片"}<ChevronRight size={18} /></button>
-            <p className="flow-note"><Server size={14} />{mode === "video" ? "Mac Studio 仅生成 PNG 帧，Windows 使用 FFmpeg 合成 MP4" : "生成结果由 Windows Media Service 保存到外接硬盘"}</p>
+            <p className="flow-note"><Server size={14} />{mode === "video" ? "Mac Studio 生成画面，Windows 使用 CosyVoice 配音并合成 MP4" : "生成结果由 Windows Media Service 保存到外接硬盘"}</p>
           </form>
 
           <section className="preview card">
@@ -236,10 +253,11 @@ function App() {
             {mode === "video" ? (
               selectedJob ? <div className="result-view">
                 <div className="media-stage">
-                  {selectedVideoUrl ? <video src={selectedVideoUrl} controls autoPlay loop /> : <div className="generation-state">{selectedJob.status === "FAILED" ? <CircleStop size={36} /> : <><div className="orbit"><Play size={26} /></div><span>{statusLabels[selectedJob.status]}</span><small>{selectedJob.status === "GENERATING_FRAMES" ? "模型正在输出连续画面" : selectedJob.status === "DOWNLOADING_FRAMES" ? "Windows 正在通过鉴权 HTTP 下载帧" : selectedJob.status === "ENCODING" ? "Windows 正在合成 MP4" : "等待计算资源"}</small></>}</div>}
+                  {selectedVideoUrl ? <video src={selectedVideoUrl} controls loop /> : <div className="generation-state">{selectedJob.status === "FAILED" ? <CircleStop size={36} /> : <><div className="orbit"><Play size={26} /></div><span>{statusLabels[selectedJob.status]}</span><small>{selectedJob.status === "GENERATING_FRAMES" ? "模型正在输出连续画面" : selectedJob.status === "DOWNLOADING_FRAMES" ? "Windows 正在通过鉴权 HTTP 下载帧" : selectedJob.status === "GENERATING_AUDIO" ? "CosyVoice 正在生成台词配音" : selectedJob.status === "ENCODING" ? "Windows 正在合成画面与音轨" : "等待计算资源"}</small></>}</div>}
                 </div>
                 <div className="result-meta"><div><span>任务 ID</span><code>{selectedJob.id.slice(0, 12)}…</code></div><div><span>镜头</span><strong>{selectedJob.shotId || shotId}</strong></div><div><span>规格</span><strong>{selectedJob.frameCount ? `${selectedJob.frameCount} 帧 · ${selectedJob.fps} FPS` : size}</strong></div>{selectedVideoUrl && <a href={selectedVideoUrl} download={`${selectedJob.projectId || "video"}-${selectedJob.shotId || selectedJob.id}.mp4`}><Download size={16} />下载 MP4</a>}</div>
                 {selectedJob.error && <p className="job-error"><AlertCircle size={15} />{selectedJob.error}</p>}
+                {selectedJob.audioEnabled && <p className="audio-hint">CosyVoice · {selectedJob.audioVoice}{selectedJob.audioDurationSeconds ? ` · ${selectedJob.audioDurationSeconds.toFixed(2)} 秒配音` : ""}{selectedJob.audioText ? `：${selectedJob.audioText}` : ""}</p>}
               </div> : <EmptyPreview type="video" />
             ) : images.length ? <div className="image-grid">{images.map((image) => <ProtectedImage key={image.result_id} config={config} image={image} onUseAsStart={() => { setStartImageResultId(image.result_id); setVideoModel("Wan2.2-TI2V-5B"); setMode("video"); setNotice("已将图片设为短剧镜头首帧"); }} />)}</div> : <EmptyPreview type="image" />}
           </section>

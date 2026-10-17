@@ -50,6 +50,7 @@ export function createVideo(
     start_image_result_id?: string;
     seed?: number;
     steps?: number;
+    audio?: { text: string; voice: string; speed: number; instructions?: string };
   },
 ): Promise<MediaJob> {
   return requestJson(endpoint(config, "/api/v1/videos/generations"), {

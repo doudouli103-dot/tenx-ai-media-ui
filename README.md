@@ -10,10 +10,16 @@ Tenx AI 图片与视频生成控制台。部署在 Windows，与 `tenx-ai-media-
 - 短剧项目、场景和镜头标识，以及可复现 Seed
 - 将已生成图片直接设为 Wan 2.2 镜头首帧
 - 展示 Windows 通过鉴权 HTTP 下载帧的任务阶段
+- CosyVoice 台词/旁白配音、音色 ID 与语速设置，MP4 同时包含画面和声音
 - 视频任务列表、自动轮询、阶段状态和错误展示
 - 通过鉴权请求预览、下载图片和 MP4
 - API Key 仅保存到浏览器当前会话
 - 响应式桌面与移动端界面
+
+生成有声视频：保持「CosyVoice 配音」勾选，在独立配音文本框填写台词/旁白，再生成视频。
+画面提示词不会自动作为台词朗读；默认音色为 `demo`，自定义音色需先在 CosyVoice 中安装。
+配音长于画面时延长最后一帧，短于画面时补静音；不包含口型同步。预览需点击播放才能听到声音。
+取消勾选可生成无声视频；历史视频不会自动补配音。
 
 ## 本地开发
 
@@ -46,6 +52,19 @@ npm run build
 - `/media-api/*` 反向代理至本机 `tenx-ai-media-service:8092`
 
 使用同源代理后无需在 Media Service 中开放浏览器 CORS。
+
+## Docker 部署
+
+在父目录 `tenx-ai-project` 中运行：
+
+```powershell
+Copy-Item .env.media.example .env
+docker compose -f docker-compose.media.yml up -d --build
+```
+
+默认访问地址为 `http://localhost:5281`。本机 Windows 保留了 5154–5253 端口段，
+原端口 5181 无法由 Docker 绑定；使用 5281 也可避免与同机的
+`tenx-ai-webui` 默认端口 5175 冲突；可通过 `.env` 中的 `TENX_MEDIA_UI_PORT` 修改。
 
 ## 连接设置
 
