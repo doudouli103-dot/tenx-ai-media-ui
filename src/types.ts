@@ -9,7 +9,7 @@ export type JobStatus =
 
 export interface MediaJob {
   id: string;
-  type: "video";
+  type: "video" | "drama";
   status: JobStatus;
   createdAt: number;
   updatedAt: number;
@@ -33,7 +33,42 @@ export interface MediaJob {
   audioVoice?: string;
   audioId?: string;
   audioDurationSeconds?: number;
+  audioDialogues?: DialogueLine[];
+  parentId?: string;
+  dramaRequest?: DramaRequest;
+  dramaShots?: (MediaJob | null)[];
+  currentShotIndex?: number;
+  dynamicDurationSeconds?: number;
 }
+
+export interface DramaShot {
+  prompt: string;
+  duration: number;
+  continue_previous: boolean;
+  start_image_result_id?: string;
+  audio?: AudioRequest;
+}
+
+export interface DramaRequest {
+  model: string;
+  size: string;
+  character_prompt: string;
+  start_image_result_id?: string;
+  shots: DramaShot[];
+}
+
+export interface DialogueLine {
+  speaker: string;
+  text: string;
+  voice: string;
+  instructions: string;
+  pause_ms: number;
+  speed: number;
+}
+
+export type AudioRequest = { text: string; voice: string; speed: number; instructions?: string }
+  | { dialogues: DialogueLine[] };
+export interface VoiceOption { id: string; name: string; }
 
 export interface HealthStatus {
   status: string;

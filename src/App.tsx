@@ -18,9 +18,12 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { createImages, createVideo, getHealth, listVideoJobs, loadProtectedMedia } from "./api";
-import type { ApiConfig, HealthStatus, ImageResult, JobStatus, MediaJob } from "./types";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createImages, createVideo, getHealth, getVoices, listVideoJobs, loadProtectedMedia, previewSpeech } from "./api";
+import type { ApiConfig, AudioRequest, DialogueLine, HealthStatus, ImageResult, JobStatus, MediaJob, VoiceOption } from "./types";
+import DialogueEditor from "./DialogueEditor";
+import { dialogueProblem } from "./dialogue";
+import { DramaComposer, DramaProgress } from "./DramaStudio";
 
 const DEFAULT_CONFIG: ApiConfig = {
   baseUrl: sessionStorage.getItem("tenx.media.baseUrl") || "/media-api",
@@ -67,9 +70,9 @@ function StatusBadge({ status }: { status: JobStatus }) {
 }
 
 function App() {
-  const [mode, setMode] = useState<"image" | "video">("video");
+  const [mode, setMode] = useState<"image" | "video" | "drama">("video");
   const [config, setConfig] = useState<ApiConfig>(DEFAULT_CONFIG);
-  const [showSettings, setShowSettings] = useState(!DEFAULT_CONFIG.apiKey);
+  const [showSettings, setShowSettings] = useState(false);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [jobs, setJobs] = useState<MediaJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<MediaJob | null>(null);
@@ -78,7 +81,7 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [prompt, setPrompt] = useState("一台未来主义机器人穿过雨夜霓虹街道，电影感光影，镜头缓慢推进");
+  const [prompt, setPrompt] = useState("");
   const [videoModel, setVideoModel] = useState("Wan2.2-TI2V-5B");
   const [imageModel, setImageModel] = useState("qwen-image");
   const [size, setSize] = useState("640x352");
@@ -92,7 +95,18 @@ function App() {
   const [audioText, setAudioText] = useState("");
   const [audioVoice, setAudioVoice] = useState("demo");
   const [audioSpeed, setAudioSpeed] = useState(1);
+  const [audioInstructions, setAudioInstructions] = useState("");
+  const [audioMode, setAudioMode] = useState<"single" | "dialogue">("dialogue");
+  const [dialogues, setDialogues] = useState<DialogueLine[]>([]);
+  const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>([]);
+  const [voiceError, setVoiceError] = useState("");
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [audioPreview, setAudioPreview] = useState("");
+  const previewVersion = useRef(0);
   const selectedVideoUrl = useProtectedUrl(config, selectedJob?.status === "COMPLETED" ? selectedJob.resultUrl : undefined);
+  const dialogueIssue = dialogueProblem(dialogues, voiceOptions.map((voice) => voice.id));
+  const audioIssue = !config.apiKey ? "先配置媒体服务连接" : !voiceOptions.length ? "先加载可用音色" : audioMode === "dialogue" ? dialogueIssue : !audioText.trim() ? "请填写旁白台词" : "";
+  const submissionIssue = !config.apiKey ? "先配置媒体服务连接" : !prompt.trim() ? "请先填写画面描述" : mode === "video" && audioEnabled ? audioIssue : "";
 
   const activeCount = useMemo(
     () => jobs.filter((job) => !["COMPLETED", "FAILED"].includes(job.status)).length,
@@ -107,7 +121,7 @@ function App() {
         config.apiKey ? listVideoJobs(config) : Promise.resolve([]),
       ]);
       setHealth(nextHealth);
-      setJobs(nextJobs);
+      setJobs(nextJobs.filter(job => !job.parentId));
       setSelectedJob((current) => current ? nextJobs.find((job) => job.id === current.id) || current : current);
       if (!quiet) setError("");
     } catch (cause) {
@@ -121,6 +135,43 @@ function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const refreshVoices = useCallback(async () => {
+    if (!config.apiKey) { setVoiceOptions([]); return; }
+    try { setVoiceOptions(await getVoices(config)); setVoiceError(""); }
+    catch (cause) { setVoiceOptions([]); setVoiceError(cause instanceof Error ? cause.message : "无法获取音色列表"); }
+  }, [config]);
+  useEffect(() => { void refreshVoices(); }, [refreshVoices]);
+  useEffect(() => {
+    previewVersion.current += 1;
+    setAudioPreview("");
+  }, [audioMode, audioText, audioVoice, audioSpeed, audioInstructions, dialogues, config]);
+  useEffect(() => () => { if (audioPreview) URL.revokeObjectURL(audioPreview); }, [audioPreview]);
+  useEffect(() => () => { previewVersion.current += 1; }, []);
+
+  function buildAudio(): AudioRequest {
+    if (!voiceOptions.length) throw new Error("请先连接 CosyVoice 并加载可用音色");
+    if (audioMode === "dialogue") {
+      if (dialogueIssue) throw new Error(dialogueIssue);
+      return { dialogues: dialogues.map((line) => ({ ...line, text: line.text.trim(), speaker: line.speaker.trim() })) };
+    }
+    if (!audioText.trim()) throw new Error("请填写配音台词");
+    if (!voiceOptions.some((voice) => voice.id === audioVoice)) throw new Error("请选择已安装的音色");
+    return { text: audioText.trim(), voice: audioVoice, speed: audioSpeed, instructions: audioInstructions.trim() };
+  }
+
+  async function previewAudio() {
+    if (!config.apiKey) { setShowSettings(true); return; }
+    setError("");
+    setPreviewBusy(true);
+    const version = previewVersion.current;
+    try {
+      const url = await previewSpeech(config, buildAudio());
+      if (version === previewVersion.current) setAudioPreview(url);
+      else URL.revokeObjectURL(url);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "试听失败"); }
+    finally { setPreviewBusy(false); }
+  }
 
   useEffect(() => {
     if (!config.apiKey || activeCount === 0) return;
@@ -160,7 +211,7 @@ function App() {
           start_image_result_id: videoModel === "Wan2.2-TI2V-5B" ? startImageResultId.trim() || undefined : undefined,
           seed: seed.trim() ? Number(seed) : undefined,
           steps: 14,
-          audio: audioEnabled ? { text: audioText.trim(), voice: audioVoice.trim(), speed: audioSpeed } : undefined,
+          audio: audioEnabled ? buildAudio() : undefined,
         });
         setJobs((current) => [job, ...current]);
         setSelectedJob(job);
@@ -187,6 +238,7 @@ function App() {
         </div>
         <nav>
           <button className={mode === "video" ? "active" : ""} onClick={() => setMode("video")}><Film size={19} />视频生成</button>
+          <button className={mode === "drama" ? "active" : ""} onClick={() => setMode("drama")}><Film size={19} />多分镜短剧</button>
           <button className={mode === "image" ? "active" : ""} onClick={() => setMode("image")}><ImageIcon size={19} />图片生成</button>
         </nav>
         <div className="sidebar-bottom">
@@ -201,20 +253,25 @@ function App() {
 
       <main>
         <header>
-          <div><span className="eyebrow">CREATIVE OPERATIONS</span><h1>{mode === "video" ? "视频生成工作台" : "图片生成工作台"}</h1></div>
+          <div><span className="eyebrow">CREATIVE OPERATIONS</span><h1>{mode === "drama" ? "多分镜短剧工作台" : mode === "video" ? "视频生成工作台" : "图片生成工作台"}</h1></div>
           <div className="header-actions">
             <div className={`service-pill ${health ? "online" : "offline"}`}><Activity size={15} />{health ? "服务在线" : "连接异常"}</div>
             <button className="icon-button" onClick={() => void refresh()} aria-label="刷新"><RefreshCw className={refreshing ? "spin" : ""} size={18} /></button>
           </div>
         </header>
 
+        {!config.apiKey && <div className="connection-notice"><span>先连接媒体服务，即可加载音色、试听和生成。画面与剧本可先填写。</span><button type="button" onClick={() => setShowSettings(true)}>配置连接</button></div>}
+        {mode === "video" && <ol className="creation-steps" aria-label="视频创作流程"><li><span>1</span>描述画面</li><li><span>2</span>导入剧本 / 编辑对白</li><li><span>3</span>试听后生成</li></ol>}
+
         {(error || notice) && <div className={`toast ${error ? "error" : "success"}`}>{error ? <AlertCircle size={17} /> : <Check size={17} />}{error || notice}<button onClick={() => { setError(""); setNotice(""); }}><X size={15} /></button></div>}
 
         <section className="workspace-grid">
-          <form className="composer card" onSubmit={submit}>
+          <div hidden={mode !== "drama"}><DramaComposer config={config} voices={voiceOptions} onSubmitted={job => { setJobs(current => [job, ...current]); setSelectedJob(job); setNotice("短剧任务已提交，将逐镜头生成并拼接"); }} /></div>
+          {mode !== "drama" && <form className="composer card" onSubmit={submit}>
             <div className="section-title"><div><span className="step">01</span><h2>描述你的画面</h2></div><WandSparkles size={21} /></div>
+            <p className="section-help">这里只描述人物外观、场景和镜头，不填角色对白。</p>
             <label className="prompt-field">
-              <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={8} maxLength={2000} required placeholder="描述主体、环境、镜头运动与视觉风格…" />
+              <textarea aria-label="画面描述" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={5} maxLength={2000} required placeholder="例如：暴雨中的未来城市，两台机甲隔着废墟对峙，蓝紫色光线映照金属装甲。镜头由低机位缓慢推进，无字幕。" />
               <span>{prompt.length} / 2000</span>
             </label>
             <div className="form-grid">
@@ -222,42 +279,58 @@ function App() {
                 {mode === "video" ? <><option>Wan2.2-TI2V-5B</option><option>HunyuanVideo-1.5</option></> : <><option>qwen-image</option><option>flux-dev</option></>}
               </select></label>
               <label><span>分辨率</span><select value={size} onChange={(event) => setSize(event.target.value)}><option>640x352</option><option>832x480</option><option>1024x576</option><option>1024x1024</option></select></label>
-              {mode === "video" && <label><span>时长</span><select value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value={3}>3 秒</option><option value={5}>5 秒</option></select></label>}
-              {mode === "video" && <>
+              {mode === "video" && <label><span>动态画面时长</span><select value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value={3}>3 秒</option><option value={5}>5 秒</option></select></label>}
+              {mode === "video" && <details className="wide-field advanced-options"><summary>镜头关联与复现参数（可选）</summary><div className="form-grid">
                 <label><span>短剧项目 ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" /></label>
                 <label><span>场景 ID</span><input value={sceneId} onChange={(event) => setSceneId(event.target.value)} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" /></label>
                 <label><span>镜头 ID</span><input value={shotId} onChange={(event) => setShotId(event.target.value)} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" /></label>
                 <label><span>固定 Seed（可选）</span><input value={seed} onChange={(event) => setSeed(event.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="留空则随机" /></label>
-              </>}
-              {mode === "video" && videoModel === "Wan2.2-TI2V-5B" && <>
+              {videoModel === "Wan2.2-TI2V-5B" && <>
                 <label className="wide-field"><span>首帧图片结果 ID（可选）</span><input value={startImageResultId} onChange={(event) => setStartImageResultId(event.target.value)} placeholder="tenx_..._00001_" /></label>
               </>}
+              </div></details>}
             </div>
             {mode === "video" && <section className="audio-options">
-              <label className="audio-toggle"><input type="checkbox" checked={audioEnabled} onChange={(event) => setAudioEnabled(event.target.checked)} />CosyVoice 配音</label>
+              <div className="audio-section-title"><h2><span className="step">02</span> 角色对白与配音</h2><label className="audio-toggle"><input type="checkbox" checked={audioEnabled} onChange={(event) => setAudioEnabled(event.target.checked)} />启用配音</label></div>
+              {!audioEnabled && <p className="audio-hint">当前将生成无声视频；开启配音后可导入角色对白或填写旁白。</p>}
               {audioEnabled && <>
+                <div className="form-grid"><label><span>配音模式</span><select value={audioMode} onChange={(event) => setAudioMode(event.target.value as "single" | "dialogue")}><option value="dialogue">多角色逐句对白</option><option value="single">单段旁白</option></select></label>
+                  <button className="audio-action" type="button" onClick={() => void refreshVoices()}>刷新可用音色</button></div>
+                {voiceError && <p className="job-error">{voiceError}</p>}
+                {voiceOptions.length === 1 && <div className="voice-notice"><strong>当前只有一个音色：{voiceOptions[0].id}</strong><span>不同角色仍会使用同一声音。新增角色音色需要授权参考录音，不是填写姓名即可变声。</span></div>}
+                {audioMode === "dialogue" ? <DialogueEditor lines={dialogues} onChange={setDialogues} voices={voiceOptions} /> : <>
                 <label className="prompt-field"><textarea aria-label="配音文本" value={audioText} onChange={(event) => setAudioText(event.target.value)} rows={3} maxLength={500} required placeholder="输入角色台词或旁白（与画面描述分开填写）" /><span>{audioText.length} / 500</span></label>
                 <div className="form-grid">
-                  <label><span>音色 ID</span><input value={audioVoice} onChange={(event) => setAudioVoice(event.target.value)} required pattern="[A-Za-z0-9_-]{1,64}" placeholder="demo" /></label>
+                  <label><span>音色</span><select value={audioVoice} onChange={(event) => setAudioVoice(event.target.value)} required>{!voiceOptions.length && <option value="">等待音色列表</option>}{voiceOptions.map((voice) => <option key={voice.id} value={voice.id}>{voice.id} · {voice.name}</option>)}</select></label>
                   <label><span>语速</span><select value={audioSpeed} onChange={(event) => setAudioSpeed(Number(event.target.value))}><option value={0.8}>0.8 倍</option><option value={1}>1.0 倍</option><option value={1.2}>1.2 倍</option><option value={1.5}>1.5 倍</option></select></label>
+                  <label className="wide-field"><span>情绪指令（不朗读）</span><input value={audioInstructions} onChange={(event) => setAudioInstructions(event.target.value)} maxLength={200} placeholder="轻声说，带着期待。" /></label>
                 </div>
-                <p className="audio-hint">台词自动分段生成；显存不足时自动切换 CPU，等待时间会增加。配音超出画面时延长最后一帧，不含口型同步。</p>
+                <p className="audio-hint">单段旁白只填台词；带角色名的剧本请切换“多角色”后导入。</p></>}
+                <div className="audition-section"><strong>先试听，再生成</strong><p>试听只生成声音，不消耗画面生成任务。</p>
+                <button type="button" className="audio-action" title={audioIssue || undefined} disabled={previewBusy || busy || !!audioIssue} onClick={() => void previewAudio()}>{previewBusy ? "配音试听生成中…（CPU 兜底可能较慢）" : "试听配音（不生成画面）"}</button>
+                {!previewBusy && audioIssue && <p className="audio-hint" role="status">{audioIssue}</p>}
+                {audioPreview && <audio className="speech-preview" src={audioPreview} controls />}
+                </div>
+                <p className="duration-notice">画面仅生成所选的 {duration} 秒。对白更长时会延长最后一帧，不会自动生成等长动作，也不包含口型同步。</p>
               </>}
             </section>}
-            <button className="primary-button" disabled={busy || !prompt.trim()}>{busy ? <LoaderCircle className="spin" size={19} /> : <Sparkles size={19} />}{busy ? "正在提交…" : mode === "video" ? "开始生成视频" : "开始生成图片"}<ChevronRight size={18} /></button>
+            <div className="generate-section"><button className="primary-button" title={submissionIssue || undefined} disabled={busy || previewBusy || !!submissionIssue}>{busy ? <LoaderCircle className="spin" size={19} /> : <Sparkles size={19} />}{busy ? "正在提交…" : mode === "video" ? audioEnabled ? "生成有声视频" : "生成无声视频" : "开始生成图片"}<ChevronRight size={18} /></button>
+            {submissionIssue && <p className="audio-hint" role="status">{submissionIssue}</p>}</div>
             <p className="flow-note"><Server size={14} />{mode === "video" ? "Mac Studio 生成画面，Windows 使用 CosyVoice 配音并合成 MP4" : "生成结果由 Windows Media Service 保存到外接硬盘"}</p>
-          </form>
+          </form>}
 
           <section className="preview card">
-            <div className="section-title"><div><span className="step">02</span><h2>结果预览</h2></div>{selectedJob && <StatusBadge status={selectedJob.status} />}</div>
-            {mode === "video" ? (
+            <div className="section-title"><div><span className="step">03</span><h2>结果预览</h2></div>{selectedJob && <StatusBadge status={selectedJob.status} />}</div>
+            {mode !== "image" ? (
               selectedJob ? <div className="result-view">
                 <div className="media-stage">
                   {selectedVideoUrl ? <video src={selectedVideoUrl} controls loop /> : <div className="generation-state">{selectedJob.status === "FAILED" ? <CircleStop size={36} /> : <><div className="orbit"><Play size={26} /></div><span>{statusLabels[selectedJob.status]}</span><small>{selectedJob.status === "GENERATING_FRAMES" ? "模型正在输出连续画面" : selectedJob.status === "DOWNLOADING_FRAMES" ? "Windows 正在通过鉴权 HTTP 下载帧" : selectedJob.status === "GENERATING_AUDIO" ? "CosyVoice 正在生成台词配音" : selectedJob.status === "ENCODING" ? "Windows 正在合成画面与音轨" : "等待计算资源"}</small></>}</div>}
                 </div>
                 <div className="result-meta"><div><span>任务 ID</span><code>{selectedJob.id.slice(0, 12)}…</code></div><div><span>镜头</span><strong>{selectedJob.shotId || shotId}</strong></div><div><span>规格</span><strong>{selectedJob.frameCount ? `${selectedJob.frameCount} 帧 · ${selectedJob.fps} FPS` : size}</strong></div>{selectedVideoUrl && <a href={selectedVideoUrl} download={`${selectedJob.projectId || "video"}-${selectedJob.shotId || selectedJob.id}.mp4`}><Download size={16} />下载 MP4</a>}</div>
                 {selectedJob.error && <p className="job-error"><AlertCircle size={15} />{selectedJob.error}</p>}
+                {selectedJob.type === "drama" && <DramaProgress job={selectedJob} config={config} voices={voiceOptions} onUpdated={job => { setSelectedJob(job); setJobs(current => current.map(item => item.id === job.id ? job : item)); }} />}
                 {selectedJob.audioEnabled && <p className="audio-hint">CosyVoice · {selectedJob.audioVoice}{selectedJob.audioDurationSeconds ? ` · ${selectedJob.audioDurationSeconds.toFixed(2)} 秒配音` : ""}{selectedJob.audioText ? `：${selectedJob.audioText}` : ""}</p>}
+                {!!selectedJob.audioDialogues?.length && <div className="audio-hint">{selectedJob.audioDialogues.map((line, index) => <p key={index}>{line.speaker || "旁白"}（{line.voice}）：{line.text}</p>)}</div>}
               </div> : <EmptyPreview type="video" />
             ) : images.length ? <div className="image-grid">{images.map((image) => <ProtectedImage key={image.result_id} config={config} image={image} onUseAsStart={() => { setStartImageResultId(image.result_id); setVideoModel("Wan2.2-TI2V-5B"); setMode("video"); setNotice("已将图片设为短剧镜头首帧"); }} />)}</div> : <EmptyPreview type="image" />}
           </section>
@@ -266,8 +339,8 @@ function App() {
         <section className="jobs-section">
           <div className="jobs-heading"><div><span className="eyebrow">RECENT ACTIVITY</span><h2>视频任务</h2></div><span>{jobs.length} 个任务</span></div>
           <div className="jobs-table card">
-            {jobs.length === 0 ? <div className="empty-jobs"><Clock3 size={22} />暂无视频任务</div> : jobs.map((job) => <button key={job.id} className={selectedJob?.id === job.id ? "selected" : ""} onClick={() => { setMode("video"); setSelectedJob(job); }}>
-              <span className="job-icon"><Film size={17} /></span><span className="job-main"><strong>{job.model}</strong><small>{new Date(job.createdAt).toLocaleString("zh-CN")}</small></span><span className="job-spec">{job.frameCount ? `${job.frameCount} 帧` : "准备中"}</span><StatusBadge status={job.status} /><ChevronRight size={17} />
+            {jobs.length === 0 ? <div className="empty-jobs"><Clock3 size={22} />暂无视频任务</div> : jobs.map((job) => <button key={job.id} className={selectedJob?.id === job.id ? "selected" : ""} onClick={() => { setMode(job.type === "drama" ? "drama" : "video"); setSelectedJob(job); }}>
+              <span className="job-icon"><Film size={17} /></span><span className="job-main"><strong>{job.type === "drama" ? "多分镜短剧 · " : ""}{job.model}</strong><small>{new Date(job.createdAt).toLocaleString("zh-CN")}</small></span><span className="job-spec">{job.type === "drama" ? `${job.dynamicDurationSeconds} 秒` : job.frameCount ? `${job.frameCount} 帧` : "准备中"}</span><StatusBadge status={job.status} /><ChevronRight size={17} />
             </button>)}
           </div>
         </section>

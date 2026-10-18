@@ -1,4 +1,4 @@
-import type { ApiConfig, HealthStatus, ImageResponse, MediaJob } from "./types";
+import type { ApiConfig, AudioRequest, DramaRequest, DramaShot, HealthStatus, ImageResponse, MediaJob, VoiceOption } from "./types";
 
 function endpoint(config: ApiConfig, path: string): string {
   return `${config.baseUrl.replace(/\/$/, "")}${path}`;
@@ -50,7 +50,7 @@ export function createVideo(
     start_image_result_id?: string;
     seed?: number;
     steps?: number;
-    audio?: { text: string; voice: string; speed: number; instructions?: string };
+    audio?: AudioRequest;
   },
 ): Promise<MediaJob> {
   return requestJson(endpoint(config, "/api/v1/videos/generations"), {
@@ -69,6 +69,31 @@ export function createImages(
     headers: headers(config, true),
     body: JSON.stringify(payload),
   });
+}
+
+export function createDrama(config: ApiConfig, payload: DramaRequest): Promise<MediaJob> {
+  return requestJson(endpoint(config, "/api/v1/dramas/generations"), {
+    method: "POST", headers: headers(config, true), body: JSON.stringify(payload),
+  });
+}
+
+export function retryDrama(config: ApiConfig, id: string, shotIndex?: number, shot?: DramaShot): Promise<MediaJob> {
+  return requestJson(endpoint(config, `/api/v1/dramas/jobs/${id}/retry`), {
+    method: "POST", headers: headers(config, true), body: JSON.stringify(shotIndex === undefined ? {} : { shot_index: shotIndex, shot }),
+  });
+}
+
+export async function getVoices(config: ApiConfig): Promise<VoiceOption[]> {
+  const result = await requestJson<{ voices: VoiceOption[] }>(endpoint(config, "/api/v1/audio/voices"), { headers: headers(config) });
+  return result.voices;
+}
+
+export async function previewSpeech(config: ApiConfig, audio: AudioRequest): Promise<string> {
+  const response = await fetch(endpoint(config, "/api/v1/audio/speech"), {
+    method: "POST", headers: headers(config, true), body: JSON.stringify(audio),
+  });
+  if (!response.ok) throw await responseError(response);
+  return URL.createObjectURL(await response.blob());
 }
 
 export async function loadProtectedMedia(config: ApiConfig, url: string): Promise<string> {
